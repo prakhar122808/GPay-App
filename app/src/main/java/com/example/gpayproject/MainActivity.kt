@@ -80,6 +80,17 @@ fun MainScreen(
 
         for ((sender, body) in sms) {
             if (isLikelyTransaction(sender, body) && !db.messageExists(body)) {
+
+
+                val amount = extractAmount(body)
+
+
+                if (amount != null) {
+                // TEMP: just log or print
+                    println("Parsed amount: $amount")
+                }
+
+
                 db.insertMessage(body)
             }
         }
@@ -104,7 +115,7 @@ fun readInboxSms(context: Context): List<Pair<String, String>> {
         arrayOf("address", "body"),
         null,
         null,
-        null
+        "date DESC"
     )
 
     cursor?.use { c ->
@@ -147,4 +158,19 @@ fun isLikelyTransaction(sender: String, body: String): Boolean {
                 b.contains("credited")
 
     return senderMatch && bodyMatch
+}
+
+fun extractAmount(text: String): Double? {
+
+    val regex = Regex(
+        """(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d{1,2})?)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    val match = regex.find(text) ?: return null
+
+    val numberPart = match.groupValues[1]
+        .replace(",", "")
+
+    return numberPart.toDoubleOrNull()
 }
