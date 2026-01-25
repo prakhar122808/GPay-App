@@ -43,4 +43,17 @@ class MessageDbHelper(context: Context) :
         }
         return list
     }
+    fun messageExists(text: String): Boolean {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT 1 FROM messages WHERE rawText = ? LIMIT 1",
+            arrayOf(text)
+        )
+        val exists = cursor.moveToFirst()
+        cursor.close()
+        return exists
+    }
+
+    fun clearAllMessages() {
+        writableDatabase.delete("messages", null, null)
+    }
 }
