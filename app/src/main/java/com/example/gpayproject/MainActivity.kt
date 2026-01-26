@@ -1,16 +1,13 @@
 package com.example.gpayproject
 
-import android.os.Bundle
 import android.Manifest
-import android.content.pm.PackageManager
 import android.content.Context
-import android.net.Uri
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -18,12 +15,23 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import com.example.gpayproject.ui.theme.GPayProjectTheme
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import com.example.gpayproject.ui.theme.GPayProjectTheme
 
 class MainActivity : ComponentActivity() {
 
-    lateinit var db: MessageDbHelper
+    private lateinit var db: MessageDbHelper
+
+    private val smsPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                tryIngestSms()
+            }
+            // else: permission denied → do nothing for now
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,13 +42,11 @@ class MainActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.READ_SMS
-            ) != PackageManager.PERMISSION_GRANTED
+            ) == PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.READ_SMS),
-                100
-            )
+            tryIngestSms()
+        } else {
+            smsPermissionLauncher.launch(Manifest.permission.READ_SMS)
         }
 
         setContent {
@@ -54,57 +60,79 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun tryIngestSms() {
+        ingestSms(this, db)
+    }
 }
+
+/* ===================== INGESTION (NO COMPOSE) ===================== */
+
+fun ingestSms(context: Context, db: MessageDbHelper) {
+    val sms = readInboxSms(context)
+
+    for ((sender, body) in sms) {
+
+        if (!isLikelyTransaction(sender, body)) continue
+        if (db.messageExists(body)) continue
+
+        val amount: Double = extractAmount(body) ?: continue
+        val timestamp = System.currentTimeMillis()
+
+        db.insertMessage(
+            rawText = body,
+            amount = amount,
+            timestamp = timestamp
+        )
+    }
+
+    for ((sender, body) in sms) {
+
+        // Gate 1: GPay only
+        if (!isGPayMessage(sender, body)) continue
+
+        // Gate 2: payment semantics
+        if (!isLikelyTransaction(sender, body)) continue
+
+        if (db.messageExists(body)) continue
+
+        // Gate 3: parsing
+        val amount = extractAmount(body)
+        if (amount == null) continue
+
+        val timestamp = System.currentTimeMillis()
+
+        db.insertMessage(
+            rawText = body,
+            amount = amount,
+            timestamp = timestamp
+        )
+    }
+}
+
+/* ===================== UI (READ ONLY) ===================== */
 
 @Composable
 fun MainScreen(
     db: MessageDbHelper,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
-    var messages by remember { mutableStateOf<List<String>>(emptyList()) }
-    var didClear by remember { mutableStateOf(false) }
+    var messages by remember {
+        mutableStateOf<List<MessageDbHelper.StoredMessage>>(emptyList())
+    }
 
     LaunchedEffect(Unit) {
-
-
-        if (!didClear) {
-            db.clearAllMessages()
-            didClear = true
-        }
-
-
-        val sms = readInboxSms(context)
-
-
-        for ((sender, body) in sms) {
-            if (isLikelyTransaction(sender, body) && !db.messageExists(body)) {
-
-
-                val amount = extractAmount(body)
-
-
-                if (amount != null) {
-                // TEMP: just log or print
-                    println("Parsed amount: $amount")
-                }
-
-
-                db.insertMessage(body)
-            }
-        }
-
-
         messages = db.getAllMessages()
     }
 
     Column(modifier = modifier) {
         for (msg in messages) {
-            Text(msg)
+            Text("${msg.rawText} — ₹${msg.amount}")
         }
     }
 }
+
+/* ===================== HELPERS ===================== */
 
 fun readInboxSms(context: Context): List<Pair<String, String>> {
     val result = mutableListOf<Pair<String, String>>()
@@ -129,18 +157,10 @@ fun readInboxSms(context: Context): List<Pair<String, String>> {
     return result
 }
 
-fun isGPayMessage(text: String): Boolean {
-    return text.contains("paid", ignoreCase = true) ||
-            text.contains("GPay", ignoreCase = true)
-}
-
 fun isLikelyTransaction(sender: String, body: String): Boolean {
-
-    // Normalize once
     val s = sender.lowercase()
     val b = body.lowercase()
 
-    // Sender-based hints (banks / gpay)
     val senderMatch =
         s.contains("gpay") ||
                 s.contains("hdfc") ||
@@ -149,7 +169,6 @@ fun isLikelyTransaction(sender: String, body: String): Boolean {
                 s.contains("axis") ||
                 s.contains("bank")
 
-    // Content-based hints (money movement)
     val bodyMatch =
         b.contains("₹") ||
                 b.contains("inr") ||
@@ -161,16 +180,22 @@ fun isLikelyTransaction(sender: String, body: String): Boolean {
 }
 
 fun extractAmount(text: String): Double? {
-
     val regex = Regex(
         """(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d{1,2})?)""",
         RegexOption.IGNORE_CASE
     )
 
     val match = regex.find(text) ?: return null
+    return match.groupValues[1].replace(",", "").toDoubleOrNull()
+}
 
-    val numberPart = match.groupValues[1]
-        .replace(",", "")
+fun isGPayMessage(sender: String, body: String): Boolean {
+    val s = sender.lowercase()
+    val b = body.lowercase()
 
-    return numberPart.toDoubleOrNull()
+
+    return s.contains("gpay") ||
+            s.contains("google") ||
+            b.contains("gpay") ||
+            b.contains("google pay")
 }
