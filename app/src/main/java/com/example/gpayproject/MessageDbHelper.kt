@@ -51,7 +51,7 @@ class MessageDbHelper(context: Context) :
         val list = mutableListOf<StoredMessage>()
 
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, rawText, amount, timestamp FROM messages ORDER BY timestamp DESC",
+            "SELECT id, rawText, amount, timestamp FROM messages ORDER BY amount",
             null
         )
 

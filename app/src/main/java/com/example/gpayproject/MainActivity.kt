@@ -76,7 +76,9 @@ fun ingestSms(context: Context, db: MessageDbHelper) {
         if (!isLikelyTransaction(sender, body)) continue
         if (db.messageExists(body)) continue
 
-        val amount: Double = extractAmount(body) ?: continue
+        // already filtered as GPay + payment
+        val amount = extractAmount(body) ?: continue
+        val direction = extractDirection(body) ?: continue
         val timestamp = System.currentTimeMillis()
 
         db.insertMessage(
@@ -97,8 +99,7 @@ fun ingestSms(context: Context, db: MessageDbHelper) {
         if (db.messageExists(body)) continue
 
         // Gate 3: parsing
-        val amount = extractAmount(body)
-        if (amount == null) continue
+        val amount = extractAmount(body) ?: continue
 
         val timestamp = System.currentTimeMillis()
 
@@ -180,22 +181,71 @@ fun isLikelyTransaction(sender: String, body: String): Boolean {
 }
 
 fun extractAmount(text: String): Double? {
-    val regex = Regex(
-        """(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d{1,2})?)""",
-        RegexOption.IGNORE_CASE
+    val cleaned = text.lowercase()
+
+    val patterns = listOf(
+        // ₹50 or ₹ 50.00
+        Regex("""₹\s*([\d,]+(?:\.\d{1,2})?)"""),
+
+        // rs. 50 / rs 50
+        Regex("""rs\.?\s*([\d,]+(?:\.\d{1,2})?)"""),
+
+        // inr 50
+        Regex("""inr\s*([\d,]+(?:\.\d{1,2})?)"""),
+
+        // 50 inr
+        Regex("""([\d,]+(?:\.\d{1,2})?)\s*inr"""),
+
+        // paid 50 / sent 50
+        Regex("""(?:paid|sent)\s*([\d,]+(?:\.\d{1,2})?)""")
     )
 
-    val match = regex.find(text) ?: return null
-    return match.groupValues[1].replace(",", "").toDoubleOrNull()
+    for (regex in patterns) {
+        val match = regex.find(cleaned) ?: continue
+        return match.groupValues[1].replace(",", "").toDoubleOrNull()
+    }
+
+    return null
 }
 
 fun isGPayMessage(sender: String, body: String): Boolean {
     val s = sender.lowercase()
     val b = body.lowercase()
 
+    // Strict sender-based detection
+    val senderMatch =
+        s.contains("gpay") ||
+                s.contains("googlepay") ||
+                s.contains("google") && s.contains("pay")
 
-    return s.contains("gpay") ||
-            s.contains("google") ||
-            b.contains("gpay") ||
-            b.contains("google pay")
+    // Fallback body check (very strict)
+    val bodyMatch =
+        b.contains("gpay") ||
+                b.contains("google pay")
+
+    return senderMatch || bodyMatch
 }
+
+enum class Direction {
+    INCOMING,
+    OUTGOING
+}
+
+fun extractDirection(text: String): Direction? {
+    val t = text.lowercase()
+
+    return when {
+        t.contains("paid") ||
+                t.contains("sent") ||
+                t.contains("debited") ||
+                t.contains("spent") -> Direction.OUTGOING
+
+        t.contains("received") ||
+                t.contains("credited") ||
+                t.contains("credit") ||
+                t.contains("got") -> Direction.INCOMING
+
+        else -> null
+    }
+}
+
