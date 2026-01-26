@@ -6,12 +6,14 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 class MessageDbHelper(context: Context) :
-    SQLiteOpenHelper(context, "gpay.db", null, 2) {
+    SQLiteOpenHelper(context, "gpay.db", null, 3) {
 
     data class StoredMessage(
         val id: Long,
         val rawText: String,
         val amount: Double,
+        val direction: Direction,
+        val counterparty: String,
         val timestamp: Long
     )
 
@@ -22,6 +24,8 @@ class MessageDbHelper(context: Context) :
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 rawText TEXT NOT NULL,
                 amount REAL NOT NULL,
+                direction TEXT NOT NULL,
+                counterparty TEXT NOT NULL,
                 timestamp INTEGER NOT NULL
             )
             """.trimIndent()
@@ -37,11 +41,15 @@ class MessageDbHelper(context: Context) :
     fun insertMessage(
         rawText: String,
         amount: Double,
+        direction: Direction,
+        counterparty: String,
         timestamp: Long
     ) {
         val values = ContentValues().apply {
             put("rawText", rawText)
             put("amount", amount)
+            put("direction", direction.name)
+            put("counterparty", counterparty)
             put("timestamp", timestamp)
         }
         writableDatabase.insert("messages", null, values)
@@ -51,7 +59,11 @@ class MessageDbHelper(context: Context) :
         val list = mutableListOf<StoredMessage>()
 
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, rawText, amount, timestamp FROM messages ORDER BY amount",
+            """
+        SELECT id, rawText, amount, direction, counterparty, timestamp
+        FROM messages
+        ORDER BY timestamp DESC
+        """.trimIndent(),
             null
         )
 
@@ -62,11 +74,14 @@ class MessageDbHelper(context: Context) :
                         id = it.getLong(0),
                         rawText = it.getString(1),
                         amount = it.getDouble(2),
-                        timestamp = it.getLong(3)
+                        direction = Direction.valueOf(it.getString(3)),
+                        counterparty = it.getString(4),
+                        timestamp = it.getLong(5)
                     )
                 )
             }
         }
+
         return list
     }
 

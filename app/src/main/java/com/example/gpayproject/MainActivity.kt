@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.dimensionResource
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import com.example.gpayproject.ui.theme.GPayProjectTheme
@@ -79,12 +80,14 @@ fun ingestSms(context: Context, db: MessageDbHelper) {
         // already filtered as GPay + payment
         val amount = extractAmount(body) ?: continue
         val direction = extractDirection(body) ?: continue
-        val timestamp = System.currentTimeMillis()
+        val counterparty = extractCounterparty(body) ?: continue
 
         db.insertMessage(
             rawText = body,
             amount = amount,
-            timestamp = timestamp
+            direction = direction,
+            counterparty = counterparty,
+            timestamp = System.currentTimeMillis()
         )
     }
 
@@ -100,12 +103,16 @@ fun ingestSms(context: Context, db: MessageDbHelper) {
 
         // Gate 3: parsing
         val amount = extractAmount(body) ?: continue
+        val direction = extractDirection(body) ?: continue
+        val counterparty = extractCounterparty(body) ?: continue
 
         val timestamp = System.currentTimeMillis()
 
         db.insertMessage(
             rawText = body,
             amount = amount,
+            direction = direction,
+            counterparty = counterparty,
             timestamp = timestamp
         )
     }
@@ -249,3 +256,33 @@ fun extractDirection(text: String): Direction? {
     }
 }
 
+fun extractCounterparty(text: String): String? {
+    val t = text.trim()
+
+    val patterns = listOf(
+        // paid ₹50 to Mr John Doe
+        Regex(
+            """\bto\s+(?:mr|mrs|ms|shri|smt)?\.?\s*([A-Za-z][A-Za-z\s]{1,30})""",
+            RegexOption.IGNORE_CASE
+        ),
+
+        // received ₹50 from Mr John Doe
+        Regex(
+            """\bfrom\s+(?:mr|mrs|ms|shri|smt)?\.?\s*([A-Za-z][A-Za-z\s]{1,30})""",
+            RegexOption.IGNORE_CASE
+        ),
+
+        // payment for Amazon
+        Regex(
+            """\bfor\s+([A-Za-z][A-Za-z\s]{1,30})""",
+            RegexOption.IGNORE_CASE
+        )
+    )
+
+    for (regex in patterns) {
+        val match = regex.find(t) ?: continue
+        return match.groupValues[1].trim()
+    }
+
+    return null
+}
