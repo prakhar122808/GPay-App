@@ -30,11 +30,74 @@ class TransactionRepository(
         return 0.0
     }
 
-    fun getWeekExpenseTotal(): Double = TODO()
+    fun getWeekExpenseTotal(): Double {
+        val start = startOfThisWeek()
 
-    fun getMonthExpenseTotal(): Double = TODO()
+        val cursor = db.readableDatabase.rawQuery(
+            """
+        SELECT SUM(amount)
+        FROM messages
+        WHERE direction = ?
+        AND timestamp >= ?
+        """.trimIndent(),
+            arrayOf(
+                Direction.OUTGOING.name,
+                start.toString()
+            )
+        )
 
-    fun getMonthAverageDailySpend(): Double = TODO()
+        cursor.use {
+            if (it.moveToFirst()) {
+                return it.getDouble(0)
+            }
+        }
+
+        return 0.0
+    }
+
+
+    fun getMonthExpenseTotal(): Double {
+        val start = startOfThisMonth()
+
+        val cursor = db.readableDatabase.rawQuery(
+            """
+        SELECT SUM(amount)
+        FROM messages
+        WHERE direction = ?
+        AND timestamp >= ?
+        """.trimIndent(),
+            arrayOf(
+                Direction.OUTGOING.name,
+                start.toString()
+            )
+        )
+
+        cursor.use {
+            if (it.moveToFirst()) {
+                return it.getDouble(0)
+            }
+        }
+
+        return 0.0
+    }
+
+
+    fun getMonthAverageDailySpend(): Double {
+        val total = getMonthExpenseTotal()
+        val days = daysElapsedThisMonth()
+
+        if (days <= 0) return 0.0
+        return total / days
+    }
+
 
     fun getTopCounterparties(limit: Int): List<Pair<String, Double>> = TODO()
+
+    private fun daysElapsedThisMonth(): Int {
+        val start = startOfThisMonth()
+        val now = System.currentTimeMillis()
+
+        val millisInDay = 24L * 60 * 60 * 1000
+        return ((now - start) / millisInDay).toInt() + 1
+    }
 }

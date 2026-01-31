@@ -39,6 +39,11 @@ class MainActivity : ComponentActivity() {
 
         db = MessageDbHelper(applicationContext)
 
+        val repo = TransactionRepository(db)
+
+        println("Month total: ${repo.getMonthExpenseTotal()}")
+        println("Days elapsed: ${repo.getMonthAverageDailySpend()}")
+
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.READ_SMS
