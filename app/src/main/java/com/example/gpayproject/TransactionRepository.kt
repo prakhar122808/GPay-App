@@ -90,9 +90,6 @@ class TransactionRepository(
         return total / days
     }
 
-
-    fun getTopCounterparties(limit: Int): List<Pair<String, Double>> = TODO()
-
     private fun daysElapsedThisMonth(): Int {
         val start = startOfThisMonth()
         val now = System.currentTimeMillis()
